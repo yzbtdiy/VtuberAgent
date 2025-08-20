@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VTuber Rig WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .authenticated { background-color: #d1ecf1; color: #0c5460; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        
+        .form-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, button {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            margin: 5px 0;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .messages {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .message.sent {
+            background-color: #e3f2fd;
+            text-align: right;
+        }
+        .message.received {
+            background-color: #f1f8e9;
+        }
+        .message.progress {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .message.error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+        
+        .quick-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .media-result {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        
+        .media-result img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+        }
+        
+        .media-result audio {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 VTuber Rig WebSocket Test Client</h1>
+        
+        <div id="status" class="status disconnected">
+            Disconnected
+        </div>
+        
+        <div class="form-group">
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" value="ws://localhost:8000/ws">
+        </div>
+        
+        <button onclick="connect()" id="connectBtn">Connect</button>
+        <button onclick="disconnect()" id="disconnectBtn" disabled>Disconnect</button>
+        
+        <h3>Authentication</h3>
+        <div class="form-group">
+            <label for="userId">User ID:</label>
+            <input type="text" id="userId" value="test_user">
+        </div>
+        <div class="form-group">
+            <label for="apiKey">API Key:</label>
+            <input type="text" id="apiKey" value="test-api-key">
+        </div>
+        <div class="form-group">
+            <label for="secretKey">Secret Key (for signature):</label>
+            <input type="text" id="secretKey" value="your_secret_key_here_change_in_production">
+        </div>
+        
+        <button onclick="authenticate()" id="authBtn" disabled>Authenticate</button>
+        <button onclick="ping()" id="pingBtn" disabled>Ping</button>
+        
+        <h3>Quick Test Messages</h3>
+        <div class="quick-buttons">
+            <button onclick="sendDanmaku('你好！今天过得怎么样？')" disabled class="danmaku-btn">对话测试</button>
+            <button onclick="sendDanmaku('请给我唱一首歌吧')" disabled class="danmaku-btn">唱歌请求</button>
+            <button onclick="sendDanmaku('画一只可爱的小猫咪')" disabled class="danmaku-btn">绘画请求</button>
+            <button onclick="sendDanmaku('帮我查询天气信息')" disabled class="danmaku-btn">其他指令</button>
+        </div>
+        
+        <h3>Custom Message</h3>
+        <div class="form-group">
+            <label for="customMessage">Custom Danmaku:</label>
+            <textarea id="customMessage" rows="3" placeholder="输入自定义弹幕内容..."></textarea>
+        </div>
+        <button onclick="sendCustomDanmaku()" id="customBtn" disabled>Send Custom Danmaku</button>
+        
+        <h3>Messages</h3>
+        <div id="messages" class="messages"></div>
+        <button onclick="clearMessages()">Clear Messages</button>
+        
+        <div id="mediaResults"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isAuthenticated = false;
+        
+        function updateStatus(status, className) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = status;
+            statusEl.className = `status ${className}`;
+        }
+        
+        function addMessage(content, type = 'received') {
+            const messagesEl = document.getElementById('messages');
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${type}`;
+            messageEl.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong>: ${content}`;
+            messagesEl.appendChild(messageEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+        
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+            document.getElementById('mediaResults').innerHTML = '';
+        }
+        
+        function updateButtons() {
+            const connected = ws && ws.readyState === WebSocket.OPEN;
+            
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('authBtn').disabled = !connected;
+            document.getElementById('pingBtn').disabled = !connected || !isAuthenticated;
+            document.getElementById('customBtn').disabled = !connected || !isAuthenticated;
+            
+            const danmakuBtns = document.querySelectorAll('.danmaku-btn');
+            danmakuBtns.forEach(btn => {
+                btn.disabled = !connected || !isAuthenticated;
+            });
+        }
+        
+        async function generateSignature(secretKey, userId, apiKey, timestamp, nonce) {
+            // Create signature data in the same format as the server expects
+            // The server sorts the keys alphabetically: api_key, nonce, timestamp, user_id
+            const data = `api_key=${apiKey}&nonce=${nonce}&timestamp=${timestamp}&user_id=${userId}`;
+            console.log('Signature data:', data);
+            
+            const encoder = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(secretKey),
+                { name: 'HMAC', hash: 'SHA-256' },
+                false,
+                ['sign']
+            );
+            const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+            const base64Signature = btoa(String.fromCharCode(...new Uint8Array(signature)));
+            console.log('Generated signature:', base64Signature);
+            return base64Signature;
+        }
+        
+        function connect() {
+            const url = document.getElementById('serverUrl').value;
+            
+            ws = new WebSocket(url);
+            
+            ws.onopen = function() {
+                updateStatus('Connected (Authentication Required)', 'connected');
+                isAuthenticated = false;
+                updateButtons();
+                addMessage('Connected to server', 'received');
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    handleMessage(message);
+                } catch (e) {
+                    addMessage(`Raw message: ${event.data}`, 'received');
+                }
+            };
+            
+            ws.onclose = function() {
+                updateStatus('Disconnected', 'disconnected');
+                isAuthenticated = false;
+                updateButtons();
+                addMessage('Disconnected from server', 'error');
+            };
+            
+            ws.onerror = function(error) {
+                updateStatus('Connection Error', 'error');
+                addMessage(`Connection error: ${error}`, 'error');
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+        
+        async function authenticate() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            
+            const userId = document.getElementById('userId').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const secretKey = document.getElementById('secretKey').value;
+            
+            // Create timestamp in the same format as server (RFC3339)
+            const now = new Date();
+            // Convert to format like: 2025-08-19T08:40:19.370+00:00
+            const timestamp = now.toISOString().replace('Z', '+00:00');
+            const nonce = 'nonce-' + Math.random().toString(36).substr(2, 9);
+            
+            console.log('Authentication data:', { userId, apiKey, timestamp, nonce });
+            
+            try {
+                const signature = await generateSignature(secretKey, userId, apiKey, timestamp, nonce);
+                
+                const authMessage = {
+                    type: 'auth',
+                    auth_data: {
+                        type: 'signature',
+                        user_id: userId,
+                        api_key: apiKey,
+                        timestamp: timestamp,
+                        nonce: nonce,
+                        signature: signature
+                    }
+                };
+                
+                console.log('Sending auth message:', authMessage);
+                ws.send(JSON.stringify(authMessage));
+                addMessage(`Sent authentication request`, 'sent');
+                addMessage(`Debug - Timestamp: ${timestamp}`, 'sent');
+                addMessage(`Debug - Signature: ${signature}`, 'sent');
+            } catch (error) {
+                addMessage(`Authentication error: ${error.message}`, 'error');
+                console.error('Authentication error:', error);
+            }
+        }
+        
+        function ping() {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !isAuthenticated) return;
+            
+            const pingMessage = { type: 'ping' };
+            ws.send(JSON.stringify(pingMessage));
+            addMessage('Sent ping', 'sent');
+        }
+        
+        function sendDanmaku(content) {
+            if (!ws || ws.readyState !== WebSocket.OPEN || !isAuthenticated) return;
+            
+            const message = {
+                type: 'danmaku',
+                content: content,
+                user_id: document.getElementById('userId').value,
+                timestamp: new Date().toISOString()
+            };
+            
+            ws.send(JSON.stringify(message));
+            addMessage(`Sent danmaku: ${content}`, 'sent');
+        }
+        
+        function sendCustomDanmaku() {
+            const content = document.getElementById('customMessage').value.trim();
+            if (!content) return;
+            
+            sendDanmaku(content);
+            document.getElementById('customMessage').value = '';
+        }
+        
+        function handleMessage(message) {
+            switch (message.type) {
+                case 'connected':
+                    addMessage(`Server: ${message.message}`, 'received');
+                    break;
+                    
+                case 'auth_success':
+                    updateStatus('Authenticated', 'authenticated');
+                    isAuthenticated = true;
+                    updateButtons();
+                    addMessage(`Authentication successful: ${message.message}`, 'received');
+                    break;
+                    
+                case 'auth_required':
+                    addMessage(`Authentication required: ${message.message}`, 'error');
+                    break;
+                    
+                case 'progress':
+                    addMessage(`Progress [${message.stage}]: ${message.message}`, 'progress');
+                    if (message.image_prompt) {
+                        addMessage(`Image prompt: ${message.image_prompt}`, 'progress');
+                    }
+                    break;
+                    
+                case 'danmaku_result':
+                    handleDanmakuResult(message);
+                    break;
+                    
+                case 'pong':
+                    addMessage('Received pong', 'received');
+                    break;
+                    
+                case 'error':
+                    addMessage(`Error: ${message.message}`, 'error');
+                    break;
+                    
+                default:
+                    addMessage(`Unknown message type: ${JSON.stringify(message)}`, 'received');
+            }
+        }
+        
+        function handleDanmakuResult(result) {
+            addMessage(`Danmaku Result - Intent: ${result.intent_type}`, 'received');
+            addMessage(`Response: ${result.text_response}`, 'received');
+            
+            const mediaResultsEl = document.getElementById('mediaResults');
+            const resultEl = document.createElement('div');
+            resultEl.className = 'media-result';
+            
+            let html = `
+                <h4>Processing Result</h4>
+                <p><strong>Original:</strong> ${result.original_danmaku}</p>
+                <p><strong>Intent:</strong> ${result.intent_type}</p>
+                <p><strong>Response:</strong> ${result.text_response}</p>
+            `;
+            
+            if (result.has_audio && result.audio_data) {
+                const audioBlob = new Blob([Uint8Array.from(atob(result.audio_data), c => c.charCodeAt(0))], {type: 'audio/mpeg'});
+                const audioUrl = URL.createObjectURL(audioBlob);
+                html += `
+                    <p><strong>Audio Response:</strong></p>
+                    <audio controls>
+                        <source src="${audioUrl}" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                `;
+            }
+            
+            if (result.has_image && result.image_data) {
+                const imageUrl = `${result.image_data}`;
+                html += `
+                    <p><strong>Generated Image:</strong></p>
+                    <img src="${imageUrl}" alt="Generated Image">
+                `;
+            }
+            
+            resultEl.innerHTML = html;
+            mediaResultsEl.appendChild(resultEl);
+        }
+        
+        // Allow Enter key to send custom danmaku
+        document.getElementById('customMessage').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendCustomDanmaku();
+            }
+        });
+        
+        // Initialize buttons state
+        updateButtons();
+    </script>
+</body>
+</html>

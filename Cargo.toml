@@ -1,0 +1,61 @@
+[package]
+name = "VtuberAPI"
+version = "0.1.0"
+edition = "2024"
+description = "VTuber danmaku processing system using Rig framework"
+license = "MIT"
+authors = ["yzbtdiy <admin@opensource.cool>"]
+
+[dependencies]
+# Rig AI framework
+rig-core = "0.18.1"
+
+# Async runtime
+tokio = { version = "1.34.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0.75"
+thiserror = "2.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# WebSocket support
+tokio-tungstenite = "0.27"
+futures-util = "0.3"
+
+# Web framework
+axum = { version = "0.8", features = ["ws", "tokio"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Configuration
+config = "0.15.14"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Cryptography for auth
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# File I/O
+bytes = "1.5"
+
+# Vector store (optional, choose based on needs)
+# rig-mongodb = "0.1"
+# rig-qdrant = "0.1"
+
+[dev-dependencies]
