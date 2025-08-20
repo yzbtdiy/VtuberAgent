@@ -1,8 +1,8 @@
 use anyhow::Result;
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -24,18 +24,18 @@ pub struct WebSocketManager {
 }
 
 impl WebSocketManager {
-    pub fn new(settings: &Settings) -> Self {
+    pub async fn new(settings: &Settings) -> Result<Self> {
         let auth_service = Arc::new(AuthService::new(settings));
-        let workflow = Arc::new(DanmakuWorkflow::new(settings));
+        let workflow = Arc::new(DanmakuWorkflow::new(settings).await?);
         let settings = Arc::new(settings.clone());
 
-        Self {
+        Ok(Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             unauthenticated_clients: Arc::new(RwLock::new(HashMap::new())),
             auth_service,
             workflow,
             settings,
-        }
+        })
     }
 
     pub async fn add_unauthenticated_client(&self, client_id: Uuid, sender: ClientSender) {
@@ -51,7 +51,10 @@ impl WebSocketManager {
         };
 
         if let Err(e) = sender.send(welcome_msg) {
-            warn!("Failed to send welcome message to client {}: {}", client_id, e);
+            warn!(
+                "Failed to send welcome message to client {}: {}",
+                client_id, e
+            );
         }
     }
 
@@ -62,7 +65,10 @@ impl WebSocketManager {
     ) -> Result<()> {
         // Authenticate the client
         let authenticated_client = self.auth_service.authenticate(&auth_data)?;
-        info!("Client {} authenticated as {}", client_id, authenticated_client.user_id);
+        info!(
+            "Client {} authenticated as {}",
+            client_id, authenticated_client.user_id
+        );
 
         // Move client from unauthenticated to authenticated
         let sender = {
@@ -126,6 +132,18 @@ impl WebSocketManager {
     async fn process_danmaku(&self, client_id: Uuid, content: &str) -> Result<()> {
         info!("Processing danmaku from client {}: {}", client_id, content);
 
+        // Get user_id from authenticated client
+        let user_id = {
+            let clients = self.clients.read().await;
+            match clients.get(&client_id) {
+                Some((authenticated_client, _)) => authenticated_client.user_id.clone(),
+                None => {
+                    error!("Client {} not found in authenticated clients", client_id);
+                    return Err(anyhow::anyhow!("Client not authenticated"));
+                }
+            }
+        };
+
         // Create progress sender
         let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
 
@@ -139,13 +157,17 @@ impl WebSocketManager {
         // Start progress forwarding task
         let progress_task = tokio::spawn(async move {
             while let Some(progress_msg) = progress_rx.recv().await {
-                manager.send_to_client(client_id_for_task, progress_msg).await;
+                manager
+                    .send_to_client(client_id_for_task, progress_msg)
+                    .await;
             }
         });
 
         // Process danmaku in background
         let processing_task = tokio::spawn(async move {
-            workflow.process_danmaku(&content_clone, Some(progress_tx)).await
+            workflow
+                .process_danmaku(&content_clone, &user_id, Some(progress_tx))
+                .await
         });
 
         // Wait for processing to complete
@@ -162,7 +184,9 @@ impl WebSocketManager {
             text_response: result.text_response,
             has_audio: result.audio_data.is_some(),
             has_image: result.image_url.is_some(),
-            audio_data: result.audio_data.map(|data| general_purpose::STANDARD.encode(data)),
+            audio_data: result
+                .audio_data
+                .map(|data| general_purpose::STANDARD.encode(data)),
             image_data: result.image_url,
         };
 
@@ -182,7 +206,10 @@ impl WebSocketManager {
         };
 
         // Try authenticated clients first
-        if self.send_to_client(client_id, auth_required_msg.clone()).await {
+        if self
+            .send_to_client(client_id, auth_required_msg.clone())
+            .await
+        {
             return;
         }
 
@@ -214,10 +241,16 @@ impl WebSocketManager {
         }
 
         // Then try unauthenticated clients
-        let unauth_clients: tokio::sync::RwLockReadGuard<'_, HashMap<Uuid, mpsc::UnboundedSender<WebSocketMessage>>> = self.unauthenticated_clients.read().await;
+        let unauth_clients: tokio::sync::RwLockReadGuard<
+            '_,
+            HashMap<Uuid, mpsc::UnboundedSender<WebSocketMessage>>,
+        > = self.unauthenticated_clients.read().await;
         if let Some(sender) = unauth_clients.get(&client_id) {
             if let Err(e) = sender.send(message) {
-                warn!("Failed to send message to unauthenticated client {}: {}", client_id, e);
+                warn!(
+                    "Failed to send message to unauthenticated client {}: {}",
+                    client_id, e
+                );
             }
         }
     }

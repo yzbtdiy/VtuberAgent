@@ -17,12 +17,33 @@
     "model": "gpt-3.5-turbo",
     "embedding_model": "text-embedding-3-small",
     "tts_model": "tts-1",
-    "tts_voice": "alloy"
+    "tts_voice": "alloy",
+    "use_indextts": false
+  },
+  "indextts": {
+    "url": "http://localhost:11996",
+    "model": "tts-1",
+    "voice": "jay_klee"
   },
   "processing": {
     "max_danmaku_length": 100,
     "response_timeout": 30,
     "max_execution_time": 120
+  },
+  "long_term_memory": {
+    "enabled": true,
+    "qdrant": {
+      "url": "http://localhost:6334",
+      "api_key": null,
+      "collection_name": "vtuber_memory",
+      "vector_size": 1536,
+      "distance": "Cosine"
+    },
+    "context": {
+      "max_context_length": 10,
+      "similarity_threshold": 0.7,
+      "memory_retention_days": 30
+    }
   },
   "logging": {
     "rust_log": "info",

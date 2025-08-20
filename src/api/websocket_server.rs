@@ -1,12 +1,12 @@
 use anyhow::Result;
 use axum::{
+    Json, Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
@@ -26,10 +26,10 @@ pub struct WebSocketServer {
 }
 
 impl WebSocketServer {
-    pub fn new(settings: Settings) -> Self {
-        let manager = Arc::new(WebSocketManager::new(&settings));
+    pub async fn new(settings: Settings) -> Result<Self> {
+        let manager = Arc::new(WebSocketManager::new(&settings).await?);
 
-        Self { settings, manager }
+        Ok(Self { settings, manager })
     }
 
     pub async fn start(self) -> Result<()> {
@@ -45,7 +45,10 @@ impl WebSocketServer {
             )
             .with_state(self.manager);
 
-        let addr = format!("{}:{}", self.settings.server.host, self.settings.server.port);
+        let addr = format!(
+            "{}:{}",
+            self.settings.server.host, self.settings.server.port
+        );
         info!("Starting server on {}", addr);
 
         let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -104,7 +107,10 @@ async fn handle_websocket(socket: WebSocket, manager: Arc<WebSocketManager>) {
             match serde_json::to_string(&msg) {
                 Ok(json_str) => {
                     if let Err(e) = sender.send(Message::Text(json_str.into())).await {
-                        error!("Failed to send message to client {}: {}", client_id_for_sender, e);
+                        error!(
+                            "Failed to send message to client {}: {}",
+                            client_id_for_sender, e
+                        );
                         break;
                     }
                 }
@@ -123,25 +129,38 @@ async fn handle_websocket(socket: WebSocket, manager: Arc<WebSocketManager>) {
             Ok(Message::Text(text)) => {
                 match serde_json::from_str::<WebSocketMessage>(&text) {
                     Ok(message) => {
-                        if let Err(e) = manager_for_receiver.handle_message(client_id_for_receiver, message).await {
-                            error!("Error handling message from client {}: {}", client_id_for_receiver, e);
-                            
+                        if let Err(e) = manager_for_receiver
+                            .handle_message(client_id_for_receiver, message)
+                            .await
+                        {
+                            error!(
+                                "Error handling message from client {}: {}",
+                                client_id_for_receiver, e
+                            );
+
                             // Send error message via manager
                             let error_msg = WebSocketMessage::Error {
                                 message: format!("处理消息时发生错误: {}", e),
                             };
-                            
-                            manager_for_receiver.send_to_client_direct(client_id_for_receiver, error_msg).await;
+
+                            manager_for_receiver
+                                .send_to_client_direct(client_id_for_receiver, error_msg)
+                                .await;
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to parse message from client {}: {}", client_id_for_receiver, e);
-                        
+                        warn!(
+                            "Failed to parse message from client {}: {}",
+                            client_id_for_receiver, e
+                        );
+
                         let error_msg = WebSocketMessage::Error {
                             message: "消息格式无效".to_string(),
                         };
-                        
-                        manager_for_receiver.send_to_client_direct(client_id_for_receiver, error_msg).await;
+
+                        manager_for_receiver
+                            .send_to_client_direct(client_id_for_receiver, error_msg)
+                            .await;
                     }
                 }
             }
@@ -152,13 +171,19 @@ async fn handle_websocket(socket: WebSocket, manager: Arc<WebSocketManager>) {
             Ok(Message::Ping(_data)) => {
                 // Note: We can't directly send pong here due to ownership
                 // This should be handled via the message system if needed
-                warn!("Received ping from {}, but cannot respond directly", client_id_for_receiver);
+                warn!(
+                    "Received ping from {}, but cannot respond directly",
+                    client_id_for_receiver
+                );
             }
             Ok(_) => {
                 // Handle other message types if needed
             }
             Err(e) => {
-                error!("WebSocket error for client {}: {}", client_id_for_receiver, e);
+                error!(
+                    "WebSocket error for client {}: {}",
+                    client_id_for_receiver, e
+                );
                 break;
             }
         }

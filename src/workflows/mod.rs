@@ -2,9 +2,11 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+use uuid;
 
 use crate::agents::DanmakuAgents;
 use crate::config::Settings;
+use crate::memory::{LongTermMemory, MemoryItem};
 use crate::models::{DanmakuProcessingResult, IntentType, WebSocketMessage};
 use crate::tools::{ImageGenerationTool, TTSTool};
 
@@ -15,27 +17,31 @@ pub struct DanmakuWorkflow {
     agents: Arc<DanmakuAgents>,
     image_tool: Arc<ImageGenerationTool>,
     tts_tool: Arc<TTSTool>,
+    memory: Arc<LongTermMemory>,
     settings: Arc<Settings>,
 }
 
 impl DanmakuWorkflow {
-    pub fn new(settings: &Settings) -> Self {
+    pub async fn new(settings: &Settings) -> Result<Self> {
         let agents = Arc::new(DanmakuAgents::new(settings));
         let image_tool = Arc::new(ImageGenerationTool::new(settings));
         let tts_tool = Arc::new(TTSTool::new(settings));
+        let memory = Arc::new(LongTermMemory::new(settings.long_term_memory.clone()).await?);
         let settings = Arc::new(settings.clone());
 
-        Self {
+        Ok(Self {
             agents,
             image_tool,
             tts_tool,
+            memory,
             settings,
-        }
+        })
     }
 
     pub async fn process_danmaku(
         &self,
         danmaku_content: &str,
+        user_id: &str,
         progress_sender: Option<ProgressSender>,
     ) -> Result<DanmakuProcessingResult> {
         info!("Processing danmaku: {}", danmaku_content);
@@ -43,6 +49,34 @@ impl DanmakuWorkflow {
         // Validate input length
         if danmaku_content.len() > self.settings.processing.max_danmaku_length {
             return Err(anyhow::anyhow!("Danmaku content too long"));
+        }
+
+        // Step 0: Retrieve relevant context from long-term memory (if enabled)
+        let mut context = String::new();
+        if self.memory.is_enabled() {
+            self.send_progress(
+                &progress_sender,
+                "memory_retrieval",
+                "🧠 正在检索相关记忆...",
+                None,
+            )
+            .await;
+
+            if let Ok(embeddings) = self.generate_embeddings(danmaku_content).await {
+                if let Ok(memory_context) = self
+                    .memory
+                    .retrieve_relevant_context(embeddings, user_id)
+                    .await
+                {
+                    if !memory_context.is_empty() {
+                        context = format!("相关记忆:\n{}\n\n", memory_context.join("\n"));
+                        info!(
+                            "Retrieved {} relevant memories for context",
+                            memory_context.len()
+                        );
+                    }
+                }
+            }
         }
 
         // Step 1: Intent Analysis
@@ -57,7 +91,7 @@ impl DanmakuWorkflow {
         let intent_type = self.agents.analyze_intent(danmaku_content).await?;
         info!("Detected intent type: {:?}", intent_type);
 
-        // Step 2: Generate Response
+        // Step 2: Generate Response (with context)
         self.send_progress(
             &progress_sender,
             "response_generation",
@@ -66,30 +100,36 @@ impl DanmakuWorkflow {
         )
         .await;
 
+        let enhanced_input = if context.is_empty() {
+            danmaku_content.to_string()
+        } else {
+            format!("{}{}", context, danmaku_content)
+        };
+
         let (text_response, image_prompt) = match intent_type {
             IntentType::Conversation => {
                 let response = self
                     .agents
-                    .generate_conversation_response(danmaku_content)
+                    .generate_conversation_response(&enhanced_input)
                     .await?;
                 (response, None)
             }
             IntentType::SingingRequest => {
                 let response = self
                     .agents
-                    .generate_singing_response(danmaku_content)
+                    .generate_singing_response(&enhanced_input)
                     .await?;
                 (response, None)
             }
             IntentType::DrawingRequest => {
                 let (response, prompt) = self
                     .agents
-                    .generate_drawing_response(danmaku_content)
+                    .generate_drawing_response(&enhanced_input)
                     .await?;
                 (response, Some(prompt))
             }
             IntentType::OtherCommand => {
-                let response = self.agents.generate_other_response(danmaku_content).await?;
+                let response = self.agents.generate_other_response(&enhanced_input).await?;
                 (response, None)
             }
         };
@@ -142,29 +182,51 @@ impl DanmakuWorkflow {
 
         let audio_data = match self.tts_tool.generate_speech(&text_response).await {
             Ok(data) => {
-                self.send_progress(
-                    &progress_sender,
-                    "tts_complete",
-                    "🔊 语音生成完成！",
-                    None,
-                )
-                .await;
+                self.send_progress(&progress_sender, "tts_complete", "🔊 语音生成完成！", None)
+                    .await;
                 Some(data)
             }
             Err(e) => {
                 error!("TTS generation failed: {}", e);
-                self.send_progress(
-                    &progress_sender,
-                    "tts_error",
-                    "❌ 语音生成失败",
-                    None,
-                )
-                .await;
+                self.send_progress(&progress_sender, "tts_error", "❌ 语音生成失败", None)
+                    .await;
                 None
             }
         };
 
-        // Step 5: Complete
+        // Step 5: Store interaction in long-term memory (if enabled)
+        if self.memory.is_enabled() {
+            self.send_progress(
+                &progress_sender,
+                "memory_storage",
+                "💾 正在保存交互记忆...",
+                None,
+            )
+            .await;
+
+            if let Ok(embeddings) = self.generate_embeddings(danmaku_content).await {
+                let memory_item = MemoryItem {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    user_id: user_id.to_string(),
+                    content: danmaku_content.to_string(),
+                    intent: format!("{:?}", intent_type),
+                    timestamp: chrono::Utc::now(),
+                    context: if context.is_empty() {
+                        None
+                    } else {
+                        Some(context.clone())
+                    },
+                };
+
+                if let Err(e) = self.memory.store_interaction(memory_item, embeddings).await {
+                    warn!("Failed to store memory: {}", e);
+                } else {
+                    info!("Successfully stored interaction in long-term memory");
+                }
+            }
+        }
+
+        // Step 6: Complete
         self.send_progress(
             &progress_sender,
             "processing_complete",
@@ -227,5 +289,31 @@ impl DanmakuWorkflow {
                 warn!("Failed to send progress update: {}", e);
             }
         }
+    }
+
+    async fn generate_embeddings(&self, text: &str) -> Result<Vec<f32>> {
+        // Use the same agent to generate embeddings for the text
+        // This is a simplified approach - in production, you might want to use a dedicated embedding model
+
+        // For now, we'll create a simple hash-based embedding as a placeholder
+        // In a real implementation, you would use OpenAI's embedding API or another embedding service
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        // Convert hash to a vector of floats (1536 dimensions for OpenAI text-embedding-3-small)
+        let mut embeddings = Vec::with_capacity(1536);
+        let mut seed = hash;
+
+        for _ in 0..1536 {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            let value = ((seed / 65536) % 32768) as f32 / 32768.0 - 1.0;
+            embeddings.push(value);
+        }
+
+        Ok(embeddings)
     }
 }

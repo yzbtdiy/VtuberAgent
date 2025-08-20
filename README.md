@@ -11,6 +11,7 @@
 - **纯 WebSocket 架构**：实时双向通信
 - **Rig AI 框架 0.18.1**：利用最新的 Rig 版本进行智能多代理处理
 - **灵活的 AI API 支持**：可配置的基础 URL 支持多种 AI 端点
+- **长期记忆系统**：基于 Qdrant 向量数据库的智能记忆和上下文检索
 - **强制身份验证**：基于 HMAC-SHA256 签名的身份验证
 - **意图分析**：自动分类弹幕内容
 - **多模态响应**：文本、音频和图像生成
@@ -29,6 +30,7 @@
 4. **工具集** (`src/tools/mod.rs`)：图像生成和 TTS 集成
 5. **工作流引擎** (`src/workflows/mod.rs`)：编排完整的处理流水线
 6. **客户端管理器** (`src/services/mod.rs`)：管理 WebSocket 连接和身份验证
+7. **长期记忆系统** (`src/memory/mod.rs`)：基于 Qdrant 的向量存储和语义搜索
 
 ### AI 处理流水线
 
@@ -45,6 +47,7 @@
 - Rust 1.70+ 和 Cargo (推荐使用 2024 edition)
 - 兼容 OpenAI API 格式的 AI API 端点
 - AI 服务的 API 密钥
+- （可选）Qdrant 向量数据库用于长期记忆功能
 - （可选）用于增强 RAG 功能的向量数据库
 
 ### 安装步骤
@@ -86,12 +89,32 @@ cp config.example.json config.json
     "model": "gpt-3.5-turbo",
     "embedding_model": "text-embedding-3-small",
     "tts_model": "tts-1",
-    "tts_voice": "alloy"
+    "tts_voice": "alloy",
+    "use_indextts": false               // 是否使用 IndexTTS 替代 OpenAI TTS
+  },
+  "indextts": {
+    "url": "http://localhost:11996",    // IndexTTS 服务地址
+    "model": "tts-1",                   // IndexTTS 模型
+    "voice": "jay_klee"                 // IndexTTS 语音
   },
   "processing": {
     "max_danmaku_length": 100,
     "response_timeout": 30,
     "max_execution_time": 120
+  },
+  "long_term_memory": {
+    "enabled": true,
+    "qdrant": {
+      "url": "http://localhost:6334",
+      "collection_name": "vtuber_memory",
+      "vector_size": 1536,
+      "distance": "Cosine"
+    },
+    "context": {
+      "max_context_length": 10,
+      "similarity_threshold": 0.7,
+      "memory_retention_days": 30
+    }
   },
   "logging": {
     "rust_log": "info",
@@ -102,6 +125,134 @@ cp config.example.json config.json
 ```
 
 **注意**：此系统使用结构化的 JSON 配置文件而非环境变量，以实现更可靠和灵活的配置管理。
+
+## TTS (文本转语音) 配置
+
+VTuber API 支持两种 TTS 服务：
+
+### OpenAI TTS
+默认使用 OpenAI 的文本转语音服务，支持多种语音模型。
+
+### IndexTTS
+IndexTTS 是一个本地部署的 TTS 服务，支持更多语音选择和更快的响应速度。
+
+#### 配置 IndexTTS
+
+1. **启用 IndexTTS**：
+   在 `config.json` 中设置：
+   ```json
+   {
+     "openai": {
+       "use_indextts": true
+     },
+     "indextts": {
+       "url": "http://localhost:11996",
+       "model": "tts-1",
+       "voice": "jay_klee"
+     }
+   }
+   ```
+
+2. **启动 IndexTTS 服务**：
+   确保 IndexTTS 服务在指定的地址运行。
+
+3. **测试 IndexTTS**：
+   使用提供的测试脚本：
+   ```bash
+   python test_indextts.py
+   ```
+
+#### API 参考
+
+IndexTTS 使用与 OpenAI 兼容的 API 格式：
+
+```bash
+curl -X POST 'http://localhost:11996/audio/speech' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "tts-1",
+    "input": "你好",
+    "voice": "jay_klee"
+  }'
+```
+
+响应体为音频数据 (MP3 格式)。
+
+## 长期记忆功能
+
+VTuber API 支持基于 Qdrant 向量数据库的智能长期记忆系统，能够记住用户的互动历史并提供上下文相关的响应。
+
+### 功能特性
+
+- **语义搜索**：基于内容相似性检索相关的历史互动
+- **用户专属记忆**：为每个用户维护独立的记忆空间
+- **意图感知**：根据意图类型组织和检索记忆
+- **可配置阈值**：支持自定义相似性阈值和上下文长度
+- **自动清理**：可配置的记忆保留期限
+
+### 配置说明
+
+在 `config.json` 中配置长期记忆：
+
+```json
+{
+  "long_term_memory": {
+    "enabled": true,                    // 启用/禁用长期记忆
+    "qdrant": {
+      "url": "http://localhost:6334",  // Qdrant 服务器地址
+      "collection_name": "vtuber_memory", // 集合名称
+      "vector_size": 1536,             // 向量维度（与嵌入模型匹配）
+      "distance": "Cosine"             // 距离算法：Cosine/Dot/Euclid/Manhattan
+    },
+    "context": {
+      "max_context_length": 10,        // 最大上下文条目数
+      "similarity_threshold": 0.7,     // 相似性阈值（0.0-1.0）
+      "memory_retention_days": 30      // 记忆保留天数
+    }
+  }
+}
+```
+
+### Qdrant 设置
+
+1. **安装 Qdrant**：
+   
+   **Windows**：
+   ```bash
+   # 下载最新版本的 Qdrant Windows 二进制文件
+   # 访问：https://github.com/qdrant/qdrant/releases
+   # 下载 qdrant-x86_64-pc-windows-msvc.zip
+   
+   # 解压并运行
+   qdrant.exe
+   ```
+   
+   **Linux/macOS**：
+   ```bash
+   # 下载二进制文件
+   wget https://github.com/qdrant/qdrant/releases/latest/download/qdrant-x86_64-unknown-linux-musl.tar.gz
+   tar -xzf qdrant-x86_64-unknown-linux-musl.tar.gz
+   
+   # 运行 Qdrant
+   ./qdrant
+   ```
+
+2. **验证连接**：
+   ```bash
+   curl http://localhost:6333/
+   ```
+
+3. **查看集合**：
+   ```bash
+   curl http://localhost:6333/collections
+   ```
+
+### 工作原理
+
+1. **存储互动**：每次用户互动都会被转换为向量并存储在 Qdrant 中
+2. **上下文检索**：处理新请求时，系统会搜索相关的历史互动
+3. **智能响应**：AI 代理会基于检索到的上下文生成更个性化的响应
+4. **记忆管理**：系统会自动清理过期的记忆以保持性能
 
 ### 运行程序
 
@@ -188,6 +339,7 @@ src/
 ├── tools/               # 外部服务集成
 ├── workflows/           # 处理编排
 ├── services/            # 客户端和连接管理
+├── memory/              # 长期记忆和向量存储
 └── api/                 # WebSocket 服务器和端点
 ```
 
@@ -289,6 +441,10 @@ thiserror = "2.0"            # 错误派生宏
 # 配置管理
 config = "0.15.14"           # 结构化配置文件支持
 
+# 向量存储和长期记忆
+rig-qdrant = "0.1.22"       # Qdrant 向量存储集成
+qdrant-client = "1.15.0"    # Qdrant 客户端
+
 # 加密和实用程序
 hmac = "0.12"                # HMAC 身份验证
 sha2 = "0.10"                # SHA256 哈希
@@ -306,6 +462,14 @@ chrono = "0.4"               # 日期和时间处理
 3. **WebSocket 连接问题**：检查防火墙和网络设置
 4. **构建错误**：确保 Rust 版本 1.70+ 并运行 `cargo clean`
 5. **配置文件错误**：检查 config.json 格式和必需字段
+6. **Qdrant 连接失败**：
+   - 确保 Qdrant 服务器正在运行（下载并启动 Qdrant 二进制文件）
+   - 检查 config.json 中的 Qdrant URL 配置
+   - 验证 Qdrant 版本兼容性
+7. **长期记忆功能不工作**：
+   - 检查 `long_term_memory.enabled` 是否设置为 `true`
+   - 验证向量维度与嵌入模型匹配（默认 1536 for text-embedding-3-small）
+   - 确认相似性阈值设置合理（0.0-1.0）
 
 ### 日志记录
 
@@ -328,16 +492,3 @@ RUST_LOG=VtuberAPI=debug cargo run        # 模块特定日志
 ## 许可证
 
 MIT 许可证 - 详见 LICENSE 文件。
-
-## 更新日志
-
-### 版本 0.1.0 (2025-08-20)
-- **Rig 框架升级**：使用 Rig 0.18.1 的最新功能
-- **Rust 2024 Edition**：使用最新的 Rust 2024 edition
-- **JSON 配置管理**：支持嵌套配置和复杂数据类型
-- **改进的错误处理**：更好的配置验证和错误报告
-- **灵活的日志配置**：通过配置文件管理日志级别和选项
-- **WebSocket 通信**：实时双向通信支持
-- **多模态响应**：文本、图像、音频的完整支持
-- **HMAC-SHA256 身份验证**：带时间戳验证的安全认证
-

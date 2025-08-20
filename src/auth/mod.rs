@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose, Engine as _};
+use anyhow::{Result, anyhow};
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -55,7 +55,7 @@ impl AuthService {
         let expected_signature = self.generate_signature(&signature_data)?;
         println!("Server expected signature: {}", expected_signature);
         println!("Client provided signature: {}", auth_data.signature);
-        
+
         if auth_data.signature != expected_signature {
             return Err(anyhow!("Invalid signature"));
         }
@@ -86,7 +86,7 @@ impl AuthService {
         let mut parts = HashMap::new();
         parts.insert("user_id", auth_data.user_id.as_str());
         parts.insert("api_key", auth_data.api_key.as_str());
-        
+
         let timestamp_str = auth_data.timestamp.to_rfc3339();
         parts.insert("timestamp", &timestamp_str);
         parts.insert("nonce", auth_data.nonce.as_str());

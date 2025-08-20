@@ -1,12 +1,13 @@
 use anyhow::Result;
-use tracing::{info, Level};
-use tracing_subscriber;
 use std::env;
+use tracing::{Level, info};
+use tracing_subscriber;
 
 mod agents;
 mod api;
 mod auth;
 mod config;
+mod memory;
 mod models;
 mod services;
 mod tools;
@@ -19,7 +20,7 @@ use config::Settings;
 async fn main() -> Result<()> {
     // Load configuration first
     let settings = Settings::load()?;
-    
+
     // Set environment variables based on configuration
     unsafe {
         env::set_var("RUST_LOG", &settings.logging.rust_log);
@@ -41,7 +42,7 @@ async fn main() -> Result<()> {
     info!("Configuration loaded successfully");
 
     // Start WebSocket server
-    let server = WebSocketServer::new(settings);
+    let server = WebSocketServer::new(settings).await?;
     server.start().await?;
 
     Ok(())

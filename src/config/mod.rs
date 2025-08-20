@@ -7,8 +7,10 @@ use std::path::Path;
 pub struct Settings {
     pub server: ServerConfig,
     pub openai: OpenAIConfig,
+    pub indextts: IndexTTSConfig,
     pub auth: AuthConfig,
     pub processing: ProcessingConfig,
+    pub long_term_memory: LongTermMemoryConfig,
     pub logging: LoggingConfig,
 }
 
@@ -25,7 +27,15 @@ pub struct OpenAIConfig {
     pub model: String,
     pub embedding_model: String,
     pub tts_model: String,
-    pub tts_voice: String, // New field for TTS voice
+    pub tts_voice: String,  // New field for TTS voice
+    pub use_indextts: bool, // Whether to use IndexTTS instead of OpenAI TTS
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexTTSConfig {
+    pub url: String,
+    pub model: String,
+    pub voice: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +48,7 @@ pub struct AuthConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessingConfig {
     pub max_danmaku_length: usize,
-    pub response_timeout: u64, // seconds
+    pub response_timeout: u64,   // seconds
     pub max_execution_time: u64, // seconds
 }
 
@@ -49,19 +59,41 @@ pub struct LoggingConfig {
     pub crewai_telemetry_disabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LongTermMemoryConfig {
+    pub enabled: bool,
+    pub qdrant: QdrantConfig,
+    pub context: ContextConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QdrantConfig {
+    pub url: String,
+    pub api_key: Option<String>,
+    pub collection_name: String,
+    pub vector_size: u64,
+    pub distance: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextConfig {
+    pub max_context_length: usize,
+    pub similarity_threshold: f32,
+    pub memory_retention_days: u32,
+}
+
 impl Settings {
     pub fn load() -> Result<Self> {
         let config_path = Path::new("config.json");
-        
+
         if !config_path.exists() {
             return Err(anyhow::anyhow!("config.json file not found"));
         }
 
-        let content = fs::read_to_string(config_path)
-            .context("Failed to read config.json file")?;
+        let content = fs::read_to_string(config_path).context("Failed to read config.json file")?;
 
-        let settings: Settings = serde_json::from_str(&content)
-            .context("Failed to parse config.json file")?;
+        let settings: Settings =
+            serde_json::from_str(&content).context("Failed to parse config.json file")?;
 
         Ok(settings)
     }
