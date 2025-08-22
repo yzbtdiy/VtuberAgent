@@ -108,7 +108,7 @@ pub struct TTSTool {
     client: Client,
     openai_config: OpenAITTSConfig,
     indextts_config: Option<IndexTTSConfig>,
-    use_indextts: bool,
+    tts_provider: String,
 }
 
 #[derive(Clone)]
@@ -135,7 +135,7 @@ impl TTSTool {
             voice: settings.openai.tts_voice.clone(),
         };
 
-        let indextts_config = if settings.openai.use_indextts {
+        let indextts_config = if settings.server.tts_provider == "indextts" {
             Some(IndexTTSConfig {
                 url: settings.indextts.url.clone(),
                 model: settings.indextts.model.clone(),
@@ -149,12 +149,12 @@ impl TTSTool {
             client: Client::new(),
             openai_config,
             indextts_config,
-            use_indextts: settings.openai.use_indextts,
+            tts_provider: settings.server.tts_provider.clone(),
         }
     }
 
     pub async fn generate_speech(&self, text: &str) -> Result<Vec<u8>> {
-        if self.use_indextts {
+        if self.tts_provider == "indextts" {
             self.generate_speech_indextts(text).await
         } else {
             self.generate_speech_openai(text).await

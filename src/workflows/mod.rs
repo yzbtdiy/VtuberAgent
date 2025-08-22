@@ -63,9 +63,12 @@ impl DanmakuWorkflow {
             .await;
 
             if let Ok(embeddings) = self.generate_embeddings(danmaku_content).await {
+                // Use the current embedding provider from settings
+                let embedding_provider = Some(self.settings.server.embedding_provider.as_str());
+                
                 if let Ok(memory_context) = self
                     .memory
-                    .retrieve_relevant_context(embeddings, user_id)
+                    .retrieve_relevant_context(embeddings, user_id, embedding_provider)
                     .await
                 {
                     if !memory_context.is_empty() {
@@ -218,7 +221,7 @@ impl DanmakuWorkflow {
                     },
                 };
 
-                if let Err(e) = self.memory.store_interaction(memory_item, embeddings).await {
+                if let Err(e) = self.memory.store_interaction(memory_item, embeddings, &self.settings.server.embedding_provider).await {
                     warn!("Failed to store memory: {}", e);
                 } else {
                     info!("Successfully stored interaction in long-term memory");
@@ -292,11 +295,15 @@ impl DanmakuWorkflow {
     }
 
     async fn generate_embeddings(&self, text: &str) -> Result<Vec<f32>> {
-        // Use the same agent to generate embeddings for the text
-        // This is a simplified approach - in production, you might want to use a dedicated embedding model
+        match self.settings.server.embedding_provider.as_str() {
+            "openai" => self.generate_embeddings_openai(text).await,
+            "dmeta-embedding-zh" => self.generate_embeddings_dmeta(text).await,
+            "rust_hash" | _ => self.generate_embeddings_rust_hash(text).await,
+        }
+    }
 
-        // For now, we'll create a simple hash-based embedding as a placeholder
-        // In a real implementation, you would use OpenAI's embedding API or another embedding service
+    async fn generate_embeddings_rust_hash(&self, text: &str) -> Result<Vec<f32>> {
+        // Original hash-based embedding as placeholder
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -313,6 +320,77 @@ impl DanmakuWorkflow {
             let value = ((seed / 65536) % 32768) as f32 / 32768.0 - 1.0;
             embeddings.push(value);
         }
+
+        Ok(embeddings)
+    }
+
+    async fn generate_embeddings_openai(&self, text: &str) -> Result<Vec<f32>> {
+        use reqwest::Client;
+        use serde_json::json;
+
+        let client = Client::new();
+        let url = format!("{}/embeddings", self.settings.openai.base_url);
+
+        let payload = json!({
+            "input": text,
+            "model": self.settings.openai.embedding_model
+        });
+
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.settings.openai.api_key))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("OpenAI embedding request failed: {}", response.status()));
+        }
+
+        let response_data: serde_json::Value = response.json().await?;
+        
+        let embeddings = response_data["data"][0]["embedding"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("Invalid OpenAI embedding response format"))?
+            .iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect();
+
+        Ok(embeddings)
+    }
+
+    async fn generate_embeddings_dmeta(&self, text: &str) -> Result<Vec<f32>> {
+        use reqwest::Client;
+        use serde_json::json;
+
+        let client = Client::new();
+        let url = format!("{}/v1/embeddings", self.settings.dmeta_embedding.url);
+
+        let payload = json!({
+            "input": text,
+            "model": self.settings.dmeta_embedding.model
+        });
+
+        let response = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("Dmeta embedding request failed: {}", response.status()));
+        }
+
+        let response_data: serde_json::Value = response.json().await?;
+        
+        let embeddings = response_data["data"][0]["embedding"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("Invalid Dmeta embedding response format"))?
+            .iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect();
 
         Ok(embeddings)
     }

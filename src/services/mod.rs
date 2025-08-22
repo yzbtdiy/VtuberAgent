@@ -293,15 +293,4 @@ impl WebSocketManager {
             }
         }
     }
-
-    pub async fn get_authenticated_client_count(&self) -> usize {
-        let clients = self.clients.read().await;
-        clients.len()
-    }
-
-    pub async fn get_total_client_count(&self) -> usize {
-        let auth_count = self.get_authenticated_client_count().await;
-        let unauth_clients = self.unauthenticated_clients.read().await;
-        auth_count + unauth_clients.len()
-    }
 }

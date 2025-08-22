@@ -99,16 +99,53 @@ impl LongTermMemory {
         Ok(qdrant_client)
     }
 
+    /// Normalize vector size to match the configured size
+    /// If input vector is smaller, pad with zeros
+    /// If input vector is larger, truncate (with warning)
+    fn normalize_vector_size(&self, mut embeddings: Vec<f32>, provider: &str) -> Vec<f32> {
+        let target_size = self.config.qdrant.vector_size as usize;
+        let current_size = embeddings.len();
+
+        if current_size == target_size {
+            return embeddings;
+        }
+
+        if current_size < target_size {
+            // Pad with zeros
+            embeddings.resize(target_size, 0.0);
+            info!(
+                "Padded {} vector from {} to {} dimensions",
+                provider, current_size, target_size
+            );
+        } else {
+            // Truncate with warning
+            embeddings.truncate(target_size);
+            tracing::warn!(
+                "Truncated {} vector from {} to {} dimensions",
+                provider, current_size, target_size
+            );
+        }
+
+        embeddings
+    }
+
     pub async fn store_interaction(
         &self,
         memory_item: MemoryItem,
         embeddings: Vec<f32>,
+        embedding_provider: &str,
     ) -> Result<()> {
         if !self.config.enabled || self.qdrant_client.is_none() {
             return Ok(());
         }
 
         let qdrant_client = self.qdrant_client.as_ref().unwrap();
+
+        // Store original size before normalization
+        let original_size = embeddings.len();
+
+        // Normalize vector size - pad with zeros if smaller than expected
+        let normalized_embeddings = self.normalize_vector_size(embeddings, embedding_provider);
 
         // Create a comprehensive document for storage
         let document_content = format!(
@@ -122,7 +159,7 @@ impl LongTermMemory {
 
         let point = PointStruct::new(
             memory_item.id.clone(),
-            embeddings,
+            normalized_embeddings.clone(),
             Payload::try_from(json!({
                 "user_id": memory_item.user_id,
                 "content": memory_item.content,
@@ -130,6 +167,9 @@ impl LongTermMemory {
                 "context": memory_item.context,
                 "timestamp": memory_item.timestamp.to_rfc3339(),
                 "document": document_content,
+                "embedding_provider": embedding_provider,
+                "original_vector_size": original_size,
+                "normalized_vector_size": normalized_embeddings.len(),
             }))
             .unwrap(),
         );
@@ -143,7 +183,10 @@ impl LongTermMemory {
             .await
             .context("Failed to store memory in Qdrant")?;
 
-        info!("Stored interaction in long-term memory: {}", memory_item.id);
+        info!(
+            "Stored interaction in long-term memory: {} (provider: {}, vector_size: {})", 
+            memory_item.id, embedding_provider, original_size
+        );
         Ok(())
     }
 
@@ -151,6 +194,7 @@ impl LongTermMemory {
         &self,
         query_embeddings: Vec<f32>,
         user_id: &str,
+        embedding_provider: Option<&str>,
     ) -> Result<Vec<String>> {
         if !self.config.enabled || self.qdrant_client.is_none() {
             return Ok(vec![]);
@@ -158,16 +202,23 @@ impl LongTermMemory {
 
         let qdrant_client = self.qdrant_client.as_ref().unwrap();
 
-        // Build search query
+        // Normalize query vector size
+        let normalized_query = self.normalize_vector_size(query_embeddings, "query");
+
+        // Build search query - temporarily disable filtering to avoid API complexity
         use qdrant_client::qdrant::SearchPointsBuilder;
 
-        let search_request = SearchPointsBuilder::new(
+        let search_builder = SearchPointsBuilder::new(
             &self.config.qdrant.collection_name,
-            query_embeddings,
+            normalized_query,
             self.config.context.max_context_length as u64,
         )
-        .with_payload(true)
-        .build();
+        .with_payload(true);
+
+        // TODO: Implement proper filtering once Qdrant API is clarified
+        // For now, we'll filter in post-processing
+
+        let search_request = search_builder.build();
 
         let response = qdrant_client
             .search_points(search_request)
@@ -180,14 +231,44 @@ impl LongTermMemory {
             // Check similarity threshold
             if point.score >= self.config.context.similarity_threshold {
                 let payload = &point.payload;
-                if let Some(user_id_value) = payload.get("user_id") {
-                    if let Some(stored_user_id) = user_id_value.as_str() {
-                        if stored_user_id == user_id {
-                            if let Some(content_value) = payload.get("content") {
-                                if let Some(content) = content_value.as_str() {
-                                    context_items.push(content.to_string());
+                
+                // Post-process filtering for user_id and embedding_provider
+                let mut should_include = true;
+                
+                // Check user_id
+                if let Some(stored_user_id) = payload.get("user_id") {
+                    if let Some(stored_user_id_str) = stored_user_id.as_str() {
+                        if stored_user_id_str != user_id {
+                            should_include = false;
+                        }
+                    } else {
+                        should_include = false;
+                    }
+                } else {
+                    should_include = false;
+                }
+
+                // Check embedding provider if filtering is enabled
+                if should_include && self.config.qdrant.enable_embedding_provider_filter {
+                    if let Some(provider) = embedding_provider {
+                        if let Some(stored_provider) = payload.get("embedding_provider") {
+                            if let Some(stored_provider_str) = stored_provider.as_str() {
+                                if stored_provider_str != provider {
+                                    should_include = false;
                                 }
+                            } else {
+                                should_include = false;
                             }
+                        } else {
+                            should_include = false;
+                        }
+                    }
+                }
+
+                if should_include {
+                    if let Some(content_value) = payload.get("content") {
+                        if let Some(content) = content_value.as_str() {
+                            context_items.push(content.to_string());
                         }
                     }
                 }
@@ -195,10 +276,12 @@ impl LongTermMemory {
         }
 
         if !context_items.is_empty() {
+            let provider_filter = embedding_provider.unwrap_or("any");
             info!(
-                "Retrieved {} relevant context items for user {}",
+                "Retrieved {} relevant context items for user {} (provider: {})",
                 context_items.len(),
-                user_id
+                user_id,
+                provider_filter
             );
         }
 
@@ -234,6 +317,7 @@ impl Default for LongTermMemory {
                 collection_name: "vtuber_memory".to_string(),
                 vector_size: 1536,
                 distance: "Cosine".to_string(),
+                enable_embedding_provider_filter: true,
             },
             context: ContextConfig {
                 max_context_length: 10,

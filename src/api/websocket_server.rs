@@ -1,18 +1,10 @@
 use anyhow::Result;
-use axum::{
-    Json, Router,
-    extract::{
-        State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
-    },
-    response::{IntoResponse, Response},
-    routing::get,
-};
 use futures_util::{SinkExt, StreamExt};
+use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -33,65 +25,45 @@ impl WebSocketServer {
     }
 
     pub async fn start(self) -> Result<()> {
-        let app = Router::new()
-            .route("/", get(root_handler))
-            .route("/health", get(health_handler))
-            .route("/ws", get(websocket_handler))
-            .route("/stats", get(stats_handler))
-            .layer(
-                ServiceBuilder::new()
-                    .layer(TraceLayer::new_for_http())
-                    .layer(CorsLayer::permissive()),
-            )
-            .with_state(self.manager);
-
         let addr = format!(
             "{}:{}",
             self.settings.server.host, self.settings.server.port
         );
-        info!("Starting server on {}", addr);
+        info!("Starting WebSocket server on {}", addr);
 
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
-        axum::serve(listener, app).await?;
+        let listener = TcpListener::bind(&addr).await?;
+
+        while let Ok((stream, addr)) = listener.accept().await {
+            let manager = Arc::clone(&self.manager);
+            tokio::spawn(handle_connection(stream, addr, manager));
+        }
 
         Ok(())
     }
 }
 
-async fn root_handler() -> impl IntoResponse {
-    "VTuber Rig WebSocket Server is running!"
-}
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, manager: Arc<WebSocketManager>) {
+    info!("New connection from: {}", addr);
 
-async fn health_handler() -> impl IntoResponse {
-    Json(serde_json::json!({
-        "status": "healthy",
-        "service": "vtuber-rig",
-        "version": "0.1.0"
-    }))
-}
+    let ws_stream = match accept_async(stream).await {
+        Ok(ws_stream) => ws_stream,
+        Err(e) => {
+            error!("Failed to accept WebSocket connection from {}: {}", addr, e);
+            return;
+        }
+    };
 
-async fn stats_handler(State(manager): State<Arc<WebSocketManager>>) -> impl IntoResponse {
-    let authenticated_count = manager.get_authenticated_client_count().await;
-    let total_count = manager.get_total_client_count().await;
-
-    Json(serde_json::json!({
-        "authenticated_clients": authenticated_count,
-        "total_clients": total_count,
-        "unauthenticated_clients": total_count - authenticated_count
-    }))
-}
-
-async fn websocket_handler(
-    ws: WebSocketUpgrade,
-    State(manager): State<Arc<WebSocketManager>>,
-) -> Response {
-    ws.on_upgrade(|socket| handle_websocket(socket, manager))
-}
-
-async fn handle_websocket(socket: WebSocket, manager: Arc<WebSocketManager>) {
     let client_id = Uuid::new_v4();
-    info!("New WebSocket connection: {}", client_id);
+    info!("WebSocket connection established: {} ({})", client_id, addr);
 
+    handle_websocket(ws_stream, client_id, manager).await;
+}
+
+async fn handle_websocket(
+    socket: WebSocketStream<TcpStream>,
+    client_id: Uuid,
+    manager: Arc<WebSocketManager>,
+) {
     let (ws_sender, mut ws_receiver) = socket.split();
     let (tx, rx) = mpsc::unbounded_channel::<WebSocketMessage>();
 
@@ -169,15 +141,21 @@ async fn handle_websocket(socket: WebSocket, manager: Arc<WebSocketManager>) {
                 break;
             }
             Ok(Message::Ping(_data)) => {
-                // Note: We can't directly send pong here due to ownership
-                // This should be handled via the message system if needed
+                // Send pong response - for now just log it
+                info!("Received ping from client {}", client_id_for_receiver);
+            }
+            Ok(Message::Pong(_)) => {
+                info!("Received pong from client {}", client_id_for_receiver);
+            }
+            Ok(Message::Binary(_)) => {
                 warn!(
-                    "Received ping from {}, but cannot respond directly",
+                    "Received binary message from client {}, ignoring",
                     client_id_for_receiver
                 );
             }
-            Ok(_) => {
-                // Handle other message types if needed
+            Ok(Message::Frame(_)) => {
+                // Handle raw frames if needed
+                info!("Received raw frame from client {}", client_id_for_receiver);
             }
             Err(e) => {
                 error!(

@@ -8,6 +8,7 @@ pub struct Settings {
     pub server: ServerConfig,
     pub openai: OpenAIConfig,
     pub indextts: IndexTTSConfig,
+    pub dmeta_embedding: DmetaEmbeddingConfig,
     pub auth: AuthConfig,
     pub processing: ProcessingConfig,
     pub long_term_memory: LongTermMemoryConfig,
@@ -18,6 +19,8 @@ pub struct Settings {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    pub tts_provider: String, // "openai" or "indextts"
+    pub embedding_provider: String, // "rust_hash", "openai", or "dmeta-embedding-zh"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,8 +30,7 @@ pub struct OpenAIConfig {
     pub model: String,
     pub embedding_model: String,
     pub tts_model: String,
-    pub tts_voice: String,  // New field for TTS voice
-    pub use_indextts: bool, // Whether to use IndexTTS instead of OpenAI TTS
+    pub tts_voice: String, // New field for TTS voice
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +38,12 @@ pub struct IndexTTSConfig {
     pub url: String,
     pub model: String,
     pub voice: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DmetaEmbeddingConfig {
+    pub url: String,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +81,7 @@ pub struct QdrantConfig {
     pub collection_name: String,
     pub vector_size: u64,
     pub distance: String,
+    pub enable_embedding_provider_filter: bool, // 是否启用按嵌入提供商过滤
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
