@@ -1,56 +1,31 @@
 [package]
-name = "VtuberAPI"
-version = "0.2.1"
+name = "VutberAgent"
+version = "0.1.0"
 edition = "2024"
-description = "VTuber danmaku processing system using Rig framework"
-license = "MIT"
-authors = ["yzbtdiy <admin@opensource.cool>"]
 
 [dependencies]
-# Rig AI framework
-rig-core = "0.18.2"
-
-# Async runtime
-tokio = { version = "1.34.0", features = ["full"] }
-
-# Error handling
-anyhow = "1.0.75"
-thiserror = "2.0"
-
-# Serialization
+anyhow = "1.0"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+dotenvy = "0.15"
+reqwest = { version = "0.12.24", features = ["json", "rustls-tls"], default-features = false }
+rig-core = { version = "0.23.1", features = ["audio", "image"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# WebSocket support
-tokio-tungstenite = "0.27"
-futures-util = "0.3"
-
-# Configuration
-config = "0.15.14"
-
-# Logging
+thiserror = "2.0"
+toml = "0.9"
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "fs", "signal", "io-std", "io-util"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# HTTP client
-reqwest = { version = "0.12",features = ["json", "stream"] }
-
-# Cryptography for auth
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"
+futures-util = "0.3"
 hmac = "0.12"
+md-5 = "0.10"
 sha2 = "0.10"
-base64 = "0.22"
-
-# UUID generation
-uuid = { version = "1.0", features = ["v4", "serde"] }
-
-# Time handling
-chrono = { version = "0.4", features = ["serde"] }
-
-# File I/O
-bytes = "1.5"
-
-# Vector store and long-term memory
-rig-qdrant = "0.1.23"
-qdrant-client = "1.15.0"
-
-[dev-dependencies]
+flate2 = { version = "1.1", features = ["zlib"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+hex = "0.4"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }

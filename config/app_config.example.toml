@@ -1,0 +1,58 @@
+artifacts_dir = "artifacts"
+
+[ws]
+access_key = "your-websocket-access-key"
+secret_key = "your-websocket-secret-key"
+bind_addr = "127.0.0.1:9000"
+signature_ttl_seconds = 300
+
+[providers.intent]
+provider = "openai"
+model = "gpt-4o-mini"
+
+[providers.conversation]
+provider = "openai"
+model = "gpt-4o-mini"
+
+[providers.image]
+provider = "openai"
+model = "dall-e-3"
+
+[providers.music]
+provider = "hyperbolic"
+model = "EN"
+
+[providers.video]
+provider = "custom"
+model = "mp4"
+
+[live.bilibili]
+id_code = "your-live-code"
+app_id = 1234567890
+access_key = "your-access-key"
+access_secret = "your-access-secret"
+host = "https://live-open.biliapi.com"
+
+[openai]
+api_key = "sk-your-openai-key"
+base_url = "https://api.your-compatible-openai.com/v1"
+chat_model = "gpt-4o-mini"
+agent_preamble = "You are Vutber, a multi-modal creative AI who can chat, narrate, sing, paint and storyboard videos."
+image_model = "dall-e-3"
+
+[hyperbolic]
+api_key = "hb-your-hyperbolic-key"
+language = "EN"
+voice = "EN-US"
+
+[zhipu]
+api_key = "zhipu-api-key"
+chat_model = "glm-4-flash"
+agent_preamble = "You are Vutber, a multi-modal creative AI who can chat, narrate, sing, paint and storyboard videos."
+api_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
+[video]
+endpoint = "https://your.video.service/generate"
+api_key = "your-video-token"
+format = "mp4"
+max_duration_seconds = 12

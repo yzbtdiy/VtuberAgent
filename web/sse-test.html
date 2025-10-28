@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vutber Agent SSE 调试面板</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+
+      h1 {
+        font-size: 1.8rem;
+        margin-bottom: 0.5rem;
+      }
+
+      section {
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.35);
+      }
+
+      section h2 {
+        margin-top: 0;
+        font-size: 1.3rem;
+        margin-bottom: 0.75rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(30, 41, 59, 0.85);
+        color: inherit;
+        font-size: 0.95rem;
+        box-sizing: border-box;
+      }
+
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: #38bdf8;
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+      }
+
+      textarea {
+        min-height: 140px;
+        resize: vertical;
+        line-height: 1.4;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+      }
+
+      .button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      button {
+        cursor: pointer;
+        border: none;
+        border-radius: 999px;
+        padding: 10px 18px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        color: white;
+        transition: all 0.3s;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      button:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
+      }
+
+      button.danger {
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+      }
+
+      button.secondary {
+        background: linear-gradient(135deg, #64748b, #475569);
+      }
+
+      .template-btn {
+        padding: 8px 14px;
+        font-size: 0.88rem;
+      }
+
+      #status-pill {
+        display: inline-block;
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      #status-pill[data-status="idle"] {
+        background: rgba(100, 116, 139, 0.3);
+        color: #94a3b8;
+      }
+
+      #status-pill[data-status="connecting"] {
+        background: rgba(251, 191, 36, 0.3);
+        color: #fbbf24;
+      }
+
+      #status-pill[data-status="connected"] {
+        background: rgba(34, 197, 94, 0.3);
+        color: #22c55e;
+      }
+
+      #status-pill[data-status="error"] {
+        background: rgba(239, 68, 68, 0.3);
+        color: #ef4444;
+      }
+
+      #log {
+        max-height: 500px;
+        overflow-y: auto;
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.9);
+        padding: 12px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+      }
+
+      .log-entry {
+        padding: 8px;
+        margin-bottom: 8px;
+        border-left: 3px solid #64748b;
+        background: rgba(30, 41, 59, 0.5);
+        border-radius: 6px;
+      }
+
+      .log-entry[data-kind="system"] {
+        border-left-color: #6366f1;
+      }
+
+      .log-entry[data-kind="inbound"] {
+        border-left-color: #22c55e;
+      }
+
+      .log-entry[data-kind="outbound"] {
+        border-left-color: #f59e0b;
+      }
+
+      .log-entry[data-kind="error"] {
+        border-left-color: #ef4444;
+        background: rgba(239, 68, 68, 0.1);
+      }
+
+      .log-entry time {
+        color: #94a3b8;
+        font-size: 0.8rem;
+        margin-right: 8px;
+      }
+
+      .log-entry strong {
+        color: #e2e8f0;
+      }
+
+      .log-entry pre {
+        margin: 6px 0 0;
+        padding: 8px;
+        background: rgba(15, 23, 42, 0.7);
+        border-radius: 4px;
+        overflow-x: auto;
+        font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+        font-size: 0.8rem;
+      }
+
+      .hint {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>🎙️ Vutber Agent SSE 调试面板</h1>
+      <p style="color: #94a3b8; margin-top: -8px">
+        Server-Sent Events (SSE) 单向流 + POST 命令提交
+      </p>
+
+      <section>
+        <h2>⚙️ 连接配置</h2>
+        <div class="row">
+          <div>
+            <label for="endpoint-input">服务端点</label>
+            <input
+              id="endpoint-input"
+              type="text"
+              value="http://127.0.0.1:9000"
+              placeholder="http://127.0.0.1:9000"
+            />
+            <p class="hint">SSE 事件流：GET /events，命令提交：POST /command</p>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="accesskey-input">Access Key</label>
+            <input
+              id="accesskey-input"
+              type="text"
+              placeholder="配置文件中的 ws.access_key"
+            />
+          </div>
+          <div>
+            <label for="secretkey-input">Secret Key</label>
+            <input
+              id="secretkey-input"
+              type="password"
+              placeholder="配置文件中的 ws.secret_key"
+            />
+          </div>
+        </div>
+        <p class="hint">
+          签名参数（access_key、timestamp、nonce、signature）通过查询参数附加
+        </p>
+        <div class="button-row">
+          <button id="connect-btn">🔗 连接事件流</button>
+          <button id="disconnect-btn" class="danger" disabled>🔌 断开</button>
+          <button id="clear-log-btn" class="secondary">🗑️ 清空日志</button>
+        </div>
+        <p style="margin-top: 12px">
+          连接状态: <span id="status-pill" data-status="idle">未连接</span>
+        </p>
+      </section>
+
+      <section>
+        <h2>📤 发送命令</h2>
+        <label for="payload-textarea">消息体 (JSON)</label>
+        <textarea id="payload-textarea" placeholder='{"action":"command","input":"写一段旅行 vlog 脚本"}'></textarea>
+        <div class="button-row">
+          <button class="template-btn" data-template="command">💬 对话示例</button>
+          <button class="template-btn" data-template="live-start">📡 启动直播</button>
+          <button class="template-btn" data-template="live-stop">⏹️ 停止直播</button>
+          <button class="template-btn" data-template="live-status">📊 直播状态</button>
+        </div>
+        <div class="button-row" style="margin-top: 16px">
+          <button id="send-btn" disabled>🚀 发送命令</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>📋 事件日志</h2>
+        <div id="log"></div>
+      </section>
+    </main>
+
+    <script>
+      const endpointInput = document.getElementById("endpoint-input");
+      const accessKeyInput = document.getElementById("accesskey-input");
+      const secretKeyInput = document.getElementById("secretkey-input");
+      const connectBtn = document.getElementById("connect-btn");
+      const disconnectBtn = document.getElementById("disconnect-btn");
+      const clearLogBtn = document.getElementById("clear-log-btn");
+      const statusPill = document.getElementById("status-pill");
+      const payloadTextarea = document.getElementById("payload-textarea");
+      const sendBtn = document.getElementById("send-btn");
+      const logContainer = document.getElementById("log");
+      const templateButtons = document.querySelectorAll(".template-btn");
+
+      let eventSource = null;
+      let currentAuthParams = null;
+
+      function appendLog(kind, title, details) {
+        const entry = document.createElement("div");
+        entry.className = "log-entry";
+        entry.dataset.kind = kind;
+
+        const timestamp = document.createElement("time");
+        timestamp.textContent = new Date().toLocaleTimeString();
+        entry.appendChild(timestamp);
+
+        const heading = document.createElement("strong");
+        heading.textContent = title;
+        entry.appendChild(heading);
+
+        if (details !== undefined) {
+          const pre = document.createElement("pre");
+          if (typeof details === "string") {
+            pre.textContent = details;
+          } else {
+            pre.textContent = JSON.stringify(details, null, 2);
+          }
+          entry.appendChild(pre);
+        }
+
+        logContainer.appendChild(entry);
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
+
+      function updateStatus(status, message) {
+        statusPill.dataset.status = status;
+        statusPill.textContent = message;
+      }
+
+      function normaliseEndpoint(rawUrl) {
+        let value = (rawUrl || "").trim();
+        if (!value) {
+          value = "http://127.0.0.1:9000";
+        }
+        if (!/^https?:\/\//i.test(value)) {
+          value = `http://${value}`;
+        }
+        try {
+          return new URL(value);
+        } catch (err) {
+          throw new Error("无法解析服务地址，请检查输入。" + (err?.message ? `\n${err.message}` : ""));
+        }
+      }
+
+      function generateNonce() {
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      }
+
+      function bufferToHex(buffer) {
+        const bytes = new Uint8Array(buffer);
+        return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      }
+
+      async function buildAuthParams() {
+        if (!window.crypto || !window.crypto.subtle) {
+          throw new Error("当前浏览器环境不支持 Web Crypto HMAC，请在 HTTPS 环境或 localhost 中调试。");
+        }
+
+        const accessKey = accessKeyInput.value.trim();
+        const secretKey = secretKeyInput.value.trim();
+
+        if (!accessKey) {
+          throw new Error("请先输入 Access Key（配置文件中的 ws.access_key）。");
+        }
+        if (!secretKey) {
+          throw new Error("请先输入 Secret Key（配置文件中的 ws.secret_key）。");
+        }
+
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        const nonce = generateNonce();
+        const canonical = `${accessKey}:${timestamp}:${nonce}`;
+
+        const encoder = new TextEncoder();
+        const key = await window.crypto.subtle.importKey(
+          "raw",
+          encoder.encode(secretKey),
+          {
+            name: "HMAC",
+            hash: "SHA-256",
+          },
+          false,
+          ["sign"]
+        );
+        const signatureBuffer = await window.crypto.subtle.sign(
+          "HMAC",
+          key,
+          encoder.encode(canonical)
+        );
+        const signature = bufferToHex(signatureBuffer);
+
+        return {
+          access_key: accessKey,
+          timestamp: timestamp,
+          nonce: nonce,
+          signature: signature,
+        };
+      }
+
+      function setConnectedState(connected) {
+        connectBtn.disabled = connected;
+        disconnectBtn.disabled = !connected;
+        sendBtn.disabled = !connected;
+      }
+
+      connectBtn.addEventListener("click", async () => {
+        if (eventSource) {
+          appendLog("system", "已经连接", "无需重复连接。");
+          return;
+        }
+
+        let authParams;
+        try {
+          authParams = await buildAuthParams();
+        } catch (error) {
+          appendLog(
+            "error",
+            "生成签名失败",
+            error instanceof Error ? error.message : String(error)
+          );
+          updateStatus("error", "生成签名失败");
+          return;
+        }
+
+        currentAuthParams = authParams;
+
+        const baseUrl = normaliseEndpoint(endpointInput.value);
+        const eventsUrl = new URL("/events", baseUrl);
+        eventsUrl.searchParams.set("access_key", authParams.access_key);
+        eventsUrl.searchParams.set("timestamp", authParams.timestamp);
+        eventsUrl.searchParams.set("nonce", authParams.nonce);
+        eventsUrl.searchParams.set("signature", authParams.signature);
+
+        appendLog("system", "开始连接 SSE", eventsUrl.toString());
+        updateStatus("connecting", "连接中...");
+        connectBtn.disabled = true;
+        disconnectBtn.disabled = true;
+        sendBtn.disabled = true;
+
+        eventSource = new EventSource(eventsUrl.toString());
+
+        eventSource.addEventListener("open", () => {
+          appendLog("system", "连接成功", `已连接到 ${eventsUrl.origin}`);
+          updateStatus("connected", "已连接");
+          setConnectedState(true);
+        });
+
+        eventSource.addEventListener("message", (event) => {
+          let payload = event.data;
+          try {
+            payload = JSON.parse(event.data);
+          } catch (_) {
+            // 保留原始字符串
+          }
+          appendLog("inbound", "收到事件", payload);
+        });
+
+        eventSource.addEventListener("error", (event) => {
+          console.error("SSE error", event);
+          appendLog(
+            "error",
+            "连接异常",
+            "请检查地址 / Access Key / Secret Key / 服务器状态。"
+          );
+          updateStatus("error", "连接异常");
+          setConnectedState(false);
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+        });
+      });
+
+      disconnectBtn.addEventListener("click", () => {
+        if (!eventSource) {
+          appendLog("system", "尚未连接", "无需断开。");
+          return;
+        }
+        appendLog("system", "主动断开", "用户请求关闭连接");
+        eventSource.close();
+        eventSource = null;
+        currentAuthParams = null;
+        updateStatus("idle", "未连接");
+        setConnectedState(false);
+      });
+
+      clearLogBtn.addEventListener("click", () => {
+        logContainer.innerHTML = "";
+      });
+
+      sendBtn.addEventListener("click", async () => {
+        if (!currentAuthParams) {
+          appendLog("system", "尚未连接", "请先建立 SSE 连接");
+          return;
+        }
+        let payloadText = payloadTextarea.value.trim();
+        if (!payloadText) {
+          appendLog("system", "无效输入", "消息体不能为空");
+          return;
+        }
+        let parsedPayload;
+        try {
+          parsedPayload = JSON.parse(payloadText);
+        } catch (err) {
+          appendLog(
+            "error",
+            "JSON 解析失败",
+            `请检查消息体格式是否正确: ${err.message}`
+          );
+          return;
+        }
+
+        const baseUrl = normaliseEndpoint(endpointInput.value);
+        const commandUrl = new URL("/command", baseUrl);
+        commandUrl.searchParams.set("access_key", currentAuthParams.access_key);
+        commandUrl.searchParams.set("timestamp", currentAuthParams.timestamp);
+        commandUrl.searchParams.set("nonce", currentAuthParams.nonce);
+        commandUrl.searchParams.set("signature", currentAuthParams.signature);
+
+        try {
+          const response = await fetch(commandUrl.toString(), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: payloadText,
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const result = await response.json();
+          appendLog("outbound", "发送命令成功", { request: parsedPayload, response: result });
+        } catch (err) {
+          appendLog(
+            "error",
+            "发送命令失败",
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+      });
+
+      templateButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const type = btn.dataset.template;
+          switch (type) {
+            case "command":
+              payloadTextarea.value = JSON.stringify(
+                {
+                  action: "command",
+                  input: "写一段旅行 vlog 脚本",
+                },
+                null,
+                2
+              );
+              break;
+            case "live-start":
+              payloadTextarea.value = JSON.stringify(
+                {
+                  action: "live_start",
+                },
+                null,
+                2
+              );
+              break;
+            case "live-stop":
+              payloadTextarea.value = JSON.stringify(
+                {
+                  action: "live_stop",
+                },
+                null,
+                2
+              );
+              break;
+            case "live-status":
+              payloadTextarea.value = JSON.stringify(
+                {
+                  action: "live_status",
+                },
+                null,
+                2
+              );
+              break;
+            default:
+              break;
+          }
+        });
+      });
+
+      setConnectedState(false);
+      updateStatus("idle", "未连接");
+    </script>
+  </body>
+</html>
